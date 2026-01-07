@@ -1,3 +1,4 @@
+import discord
 from discord.ext import commands
 
 from bot.player import PlayerState
@@ -85,5 +86,20 @@ class MusicPlayer(commands.Cog):
     async def queue(self, ctx):
         state = self.get_state(ctx.guild.id)
         await ctx.send(
-            "\n".join(f"{i + 1}. {url}" for i, url in enumerate(state.queue))
+                "\n".join(f"{i + 1}. <{url}>" for i, url in enumerate(state.queue[:10]))
         )
+
+    @commands.command(aliases=['v', 'vol'])
+    async def volume(self, ctx, volume: int| None=None):
+        if not isinstance(ctx.voice_client, discord.VoiceClient):
+            return await ctx.message.add_reaction("❌")
+        if not isinstance(ctx.voice_client.source, discord.PCMVolumeTransformer):
+            return await ctx.message.add_reaction("❌")
+
+        if volume is None:
+            return await ctx.send(f"Current volume: {ctx.voice_client.source.volume * 100}")
+
+        if volume < 0 or volume > 100:
+            return await ctx.message.add_reaction("❌")
+
+        ctx.voice_client.source.volume = volume / 100
