@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from ctypes.util import find_library
 
 import discord
 from dotenv import load_dotenv
@@ -16,7 +17,7 @@ async def main():
     load_dotenv()
 
     if not discord.opus.is_loaded():
-        discord.opus.load_opus(os.environ["OPUS_PATH"])
+        discord.opus.load_opus(os.getenv("OPUS_PATH") or find_library("opus") or "")
     if not discord.opus.is_loaded():
         raise Exception("Failed to load opus")
 
