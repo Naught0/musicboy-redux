@@ -117,7 +117,7 @@ class MusicPlayer(commands.Cog):
             return await self.play(ctx, url=url)
 
         embeds = make_queue_embeds(state)
-        message = await ctx.send(embed=embeds[0], delete_after=DELETE_AFTER)
+        message = await ctx.send(embed=embeds[0])
         if len(embeds) > 1:
             paginator = EmbedPaginator(embeds=embeds, message=message)
             await paginator.start()
