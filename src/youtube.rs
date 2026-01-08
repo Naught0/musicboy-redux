@@ -1,7 +1,7 @@
+use rusty_ytdl::{Video, VideoOptions, VideoQuality, VideoSearchOptions};
+// Fix: Import Playlist from the 'search' module as suggested by the compiler
+use rusty_ytdl::search::Playlist; 
 use serde::{Deserialize, Serialize};
-use std::process::Stdio;
-use tokio::process::Command;
-use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoInfo {
@@ -11,81 +11,51 @@ pub struct VideoInfo {
     pub duration: f64,
 }
 
-fn get_node_arg() -> String {
-    let path = env::var("NODE_PATH").unwrap_or_else(|_| "node".to_string());
-    // If it looks like a path, prepend "node:", otherwise assume it's just the binary name
-    if path.contains('/') || path.contains('\\') {
-        format!("node:{}", path)
-    } else {
-        "node".to_string()
-    }
-}
-
 pub async fn get_video_info(url: &str) -> anyhow::Result<VideoInfo> {
-    let node_arg = get_node_arg();
-    
-    let output = Command::new("yt-dlp")
-        .args(&[
-            "-J",
-            "--no-playlist",
-            "--js-runtimes", &node_arg,
-            "-f", "bestaudio/best",
-            url
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn yt-dlp: {}", e))?
-        .wait_with_output()
-        .await?;
+    // Initialize with options to prefer audio
+    let video = Video::new_with_options(
+        url,
+        VideoOptions {
+            quality: VideoQuality::HighestAudio,
+            filter: VideoSearchOptions::Audio,
+            ..Default::default()
+        },
+    )?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!("yt-dlp error: {}", stderr));
-    }
+    // Fetch info
+    let info = video.get_info().await?;
+    let details = &info.video_details;
 
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    
-    let title = json["title"].as_str().unwrap_or("Unknown Title").to_string();
-    let webpage_url = json["webpage_url"].as_str().unwrap_or(url).to_string();
-    let audio_url = json["url"].as_str().unwrap_or("").to_string();
-    let duration = json["duration"].as_f64().unwrap_or(0.0);
+    // Find best audio format
+    let formats = info.formats;
+    let best_format = formats
+        .iter()
+        .filter(|f| f.has_audio)
+        .max_by_key(|f| f.audio_bitrate.unwrap_or(0))
+        .ok_or_else(|| anyhow::anyhow!("No audio format found"))?;
+
+    let duration = details.length_seconds.parse::<f64>().unwrap_or(0.0);
 
     Ok(VideoInfo {
-        title,
-        url: webpage_url,
-        audio_url,
+        title: details.title.clone(),
+        url: details.video_url.clone(),
+        audio_url: best_format.url.clone(),
         duration,
     })
 }
 
 pub async fn get_playlist_urls(url: &str) -> anyhow::Result<Vec<String>> {
-    let node_arg = get_node_arg();
-
-    let output = Command::new("yt-dlp")
-        .args(&[
-            "--flat-playlist", 
-            "-J",
-            "--js-runtimes", &node_arg, 
-            url
-        ])
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn yt-dlp: {}", e))?
-        .wait_with_output()
-        .await?;
-
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    
-    let mut urls = Vec::new();
-    if let Some(entries) = json["entries"].as_array() {
-        for entry in entries {
-            if let Some(id) = entry["id"].as_str() {
-                urls.push(format!("https://www.youtube.com/watch?v={}", id));
-            }
-        }
+    // Check if it looks like a playlist
+    if url.contains("list=") {
+        // Fix: Use the imported 'Playlist' struct directly
+        let playlist = Playlist::get(url, None).await?;
+        let urls = playlist
+            .videos
+            .iter()
+            .map(|v| v.url.clone())
+            .collect();
+        Ok(urls)
     } else {
-        urls.push(url.to_string());
+        Ok(vec![url.to_string()])
     }
-    
-    Ok(urls)
 }

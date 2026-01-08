@@ -10,13 +10,28 @@ dotenvy = "0.15"
 poise = "0.6"
 rand = "0.8"
 redis = { version = "0.24", features = ["tokio-comp", "json"] }
-reqwest = { version = "0.11", features = ["json"] } 
+
+# Reqwest: Pure Rust TLS
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serenity = { version = "0.12", features = ["voice", "cache", "gateway"] }
-songbird = { version = "0.4", features = ["builtin-queue"] } 
-# The critical fix: We must depend on symphonia directly to enable codecs
+
+# Serenity: Pure Rust TLS
+serenity = { version = "0.12", default-features = false, features = ["voice", "cache", "gateway", "rustls_backend"] }
+
+# Songbird Fix:
+# - 'driver': Enables voice connection logic.
+# - 'rustls': Enables the pure-rust TLS stack (fixes the build error).
+# - 'builtin-queue': Enables the track queue we use.
+songbird = { version = "0.4", default-features = false, features = ["builtin-queue", "driver", "serenity", "gateway", "rustls"] }
+
+# Symphonia: Pure Rust decoders (MP3, Opus, etc)
 symphonia = { version = "0.5", features = ["all"] }
+
+# Rusty_ytdl: Pure Rust TLS
+rusty_ytdl = { version = "0.7", default-features = false, features = ["live", "search", "rustls-tls"] }
+
 tokio = { version = "1.36", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"

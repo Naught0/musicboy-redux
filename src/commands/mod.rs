@@ -1,11 +1,8 @@
 use crate::{cache::VideoInfoCache, player::PlayerState, utils, youtube, Context, Error};
 use poise::serenity_prelude as serenity;
-use songbird::Call;
+use songbird::{input::HttpRequest, Call};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use std::process::{Command, Stdio};
-use songbird::input::ChildContainer;
-use std::env;
 
 pub fn all_commands() -> Vec<poise::Command<crate::Data, crate::Error>> {
     vec![
@@ -33,15 +30,6 @@ async fn get_state(ctx: &Context<'_>) -> Option<Arc<Mutex<PlayerState>>> {
     map.get(&guild_id).map(|r| r.value().clone())
 }
 
-fn get_node_arg() -> String {
-    let path = env::var("NODE_PATH").unwrap_or_else(|_| "node".to_string());
-    if path.contains('/') || path.contains('\\') {
-        format!("node:{}", path)
-    } else {
-        "node".to_string()
-    }
-}
-
 async fn play_next_in_queue(
     handler: Arc<Mutex<Call>>,
     state: Arc<Mutex<PlayerState>>,
@@ -54,43 +42,11 @@ async fn play_next_in_queue(
         
         println!("▶️ Playing: {}", track_info.title);
 
-        let node_arg = get_node_arg();
-
-        // 1. yt-dlp (Silence output)
-        let mut ytdlp = Command::new("yt-dlp")
-            .args(&[
-                "-q", "--no-warnings", 
-                "--js-runtimes", &node_arg,
-                "--remote-components", "ejs:github",
-                "-f", "bestaudio/best",
-                "--no-playlist",
-                "-o", "-",
-                &track_info.url
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .stdin(Stdio::null())
-            .spawn()
-            .expect("Failed to spawn yt-dlp");
-
-        // 2. ffmpeg (Ogg/Opus)
-        // With 'symphonia' features enabled in Cargo.toml, this format is now supported.
-        let ffmpeg = Command::new("ffmpeg")
-            .args(&[
-                "-i", "pipe:0",
-                "-c:a", "libopus",
-                "-b:a", "128k",
-                "-f", "ogg",
-                "-"
-            ])
-            .stdin(ytdlp.stdout.take().expect("Failed to open yt-dlp stdout"))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("Failed to spawn ffmpeg");
-
-        let container = ChildContainer::from(ffmpeg);
-        let src = songbird::input::Input::from(container);
+        // Native HTTP streaming via Reqwest + Symphonia
+        let client = reqwest::Client::new();
+        let input = HttpRequest::new(client, track_info.audio_url.clone());
+        
+        let src = songbird::input::Input::from(input);
         let handle = handler_guard.play_input(src);
         
         state_guard.current_handle = Some(handle);
@@ -159,22 +115,37 @@ async fn play(ctx: Context<'_>, #[rest] url: Option<String>) -> Result<(), Error
 
     ctx.say("🔄 Processing...").await?;
 
-    let urls = youtube::get_playlist_urls(&url).await?;
+    // Use rusty_ytdl logic
+    let urls_res = youtube::get_playlist_urls(&url).await;
+    let urls = match urls_res {
+        Ok(u) => u,
+        Err(e) => {
+            ctx.say(format!("❌ Error fetching playlist: {}", e)).await?;
+            return Ok(());
+        }
+    };
+
     let cache = VideoInfoCache::new(&ctx.data().redis);
     let mut added_count = 0;
 
     for u in urls {
-        let info = if let Some(cached) = cache.get(&u).await {
-            cached
+        let info_res = if let Some(cached) = cache.get(&u).await {
+            Ok(cached)
         } else {
-            let fetched = youtube::get_video_info(&u).await?;
-            let _ = cache.set(&fetched).await;
-            fetched
+            youtube::get_video_info(&u).await
         };
 
-        let mut lock = state.lock().await;
-        lock.add_track(info);
-        added_count += 1;
+        match info_res {
+            Ok(info) => {
+                let _ = cache.set(&info).await;
+                let mut lock = state.lock().await;
+                lock.add_track(info);
+                added_count += 1;
+            }
+            Err(e) => {
+                println!("Error fetching {}: {}", u, e);
+            }
+        }
     }
 
     if let Some(manager) = songbird::get(ctx.serenity_context()).await {
