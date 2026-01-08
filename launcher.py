@@ -17,12 +17,10 @@ async def main():
 
     if not discord.opus.is_loaded():
         discord.opus.load_opus(os.environ["OPUS_PATH"])
-
     if not discord.opus.is_loaded():
         raise Exception("Failed to load opus")
 
     bot = MusicBotRedux()
-
     await bot.start(os.environ["BOT_TOKEN"])
 
 
