@@ -3,6 +3,9 @@ use poise::serenity_prelude as serenity;
 use songbird::Call;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::process::{Command, Stdio};
+use songbird::input::ChildContainer;
+use std::env;
 
 pub fn all_commands() -> Vec<poise::Command<crate::Data, crate::Error>> {
     vec![
@@ -30,19 +33,65 @@ async fn get_state(ctx: &Context<'_>) -> Option<Arc<Mutex<PlayerState>>> {
     map.get(&guild_id).map(|r| r.value().clone())
 }
 
+fn get_node_arg() -> String {
+    let path = env::var("NODE_PATH").unwrap_or_else(|_| "node".to_string());
+    if path.contains('/') || path.contains('\\') {
+        format!("node:{}", path)
+    } else {
+        "node".to_string()
+    }
+}
+
 async fn play_next_in_queue(
     handler: Arc<Mutex<Call>>,
     state: Arc<Mutex<PlayerState>>,
 ) {
     let mut state_guard = state.lock().await;
-    
     state_guard.current_handle = None;
 
     if let Some(track_info) = state_guard.pop_next() {
         let mut handler_guard = handler.lock().await;
         
-        let src = songbird::input::YoutubeDl::new(reqwest::Client::new(), track_info.url.clone());
-        let handle = handler_guard.play_input(src.into());
+        println!("▶️ Playing: {}", track_info.title);
+
+        let node_arg = get_node_arg();
+
+        // 1. yt-dlp (Silence output)
+        let mut ytdlp = Command::new("yt-dlp")
+            .args(&[
+                "-q", "--no-warnings", 
+                "--js-runtimes", &node_arg,
+                "--remote-components", "ejs:github",
+                "-f", "bestaudio/best",
+                "--no-playlist",
+                "-o", "-",
+                &track_info.url
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn yt-dlp");
+
+        // 2. ffmpeg (Ogg/Opus)
+        // With 'symphonia' features enabled in Cargo.toml, this format is now supported.
+        let ffmpeg = Command::new("ffmpeg")
+            .args(&[
+                "-i", "pipe:0",
+                "-c:a", "libopus",
+                "-b:a", "128k",
+                "-f", "ogg",
+                "-"
+            ])
+            .stdin(ytdlp.stdout.take().expect("Failed to open yt-dlp stdout"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("Failed to spawn ffmpeg");
+
+        let container = ChildContainer::from(ffmpeg);
+        let src = songbird::input::Input::from(container);
+        let handle = handler_guard.play_input(src);
         
         state_guard.current_handle = Some(handle);
     }

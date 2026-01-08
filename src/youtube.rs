@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use tokio::process::Command;
+use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoInfo {
@@ -10,21 +11,36 @@ pub struct VideoInfo {
     pub duration: f64,
 }
 
+fn get_node_arg() -> String {
+    let path = env::var("NODE_PATH").unwrap_or_else(|_| "node".to_string());
+    // If it looks like a path, prepend "node:", otherwise assume it's just the binary name
+    if path.contains('/') || path.contains('\\') {
+        format!("node:{}", path)
+    } else {
+        "node".to_string()
+    }
+}
+
 pub async fn get_video_info(url: &str) -> anyhow::Result<VideoInfo> {
+    let node_arg = get_node_arg();
+    
     let output = Command::new("yt-dlp")
         .args(&[
             "-J",
             "--no-playlist",
-            "-f", "bestaudio",
+            "--js-runtimes", &node_arg,
+            "-f", "bestaudio/best",
             url
         ])
         .stdout(Stdio::piped())
-        .spawn()?
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn yt-dlp: {}", e))?
         .wait_with_output()
         .await?;
 
     if !output.status.success() {
-        return Err(anyhow::anyhow!("yt-dlp failed"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("yt-dlp error: {}", stderr));
     }
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
@@ -43,10 +59,18 @@ pub async fn get_video_info(url: &str) -> anyhow::Result<VideoInfo> {
 }
 
 pub async fn get_playlist_urls(url: &str) -> anyhow::Result<Vec<String>> {
+    let node_arg = get_node_arg();
+
     let output = Command::new("yt-dlp")
-        .args(&["--flat-playlist", "-J", url])
+        .args(&[
+            "--flat-playlist", 
+            "-J",
+            "--js-runtimes", &node_arg, 
+            url
+        ])
         .stdout(Stdio::piped())
-        .spawn()?
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn yt-dlp: {}", e))?
         .wait_with_output()
         .await?;
 
