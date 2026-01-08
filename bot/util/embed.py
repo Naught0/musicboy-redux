@@ -30,7 +30,7 @@ def make_np_embed(state: PlayerState, progress: float | None = None):
             f"{seconds_to_time_str(progress)}/{seconds_to_time_str(info.duration)}"
         )
         em.description = (
-            f"```{draw_progress_bar(progress, info.duration)}\n{prog_str:>23}```"
+            f"```{draw_progress_bar(progress, info.duration):>23}\n{prog_str:>23}```"
         )
 
     return em
