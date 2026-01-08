@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "discord-py[voice]>=2.6.4",
+    "orjson>=3.11.5",
     "python-dotenv>=1.2.1",
+    "redis[hiredis]>=7.1.0",
     "yt-dlp>=2025.12.8",
 ]
 

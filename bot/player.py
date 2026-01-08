@@ -2,13 +2,15 @@ import asyncio
 import random
 from collections.abc import Iterable
 
+from bot.util.cache import VideoInfoCache
 from bot.youtube import VideoInfo, get_video_info
 
 
 class PlayerState:
     """Manages the playlist state for a single guild."""
 
-    def __init__(self):
+    def __init__(self, cache: VideoInfoCache):
+        self.cache = cache
         self.playlist: list[VideoInfo] = []
         self.queue: list[VideoInfo] = []
         self.current_index: int = -1
@@ -27,7 +29,11 @@ class PlayerState:
         if not self.loop:
             self.loop = asyncio.get_event_loop()
 
-        track = await self.loop.run_in_executor(None, get_video_info, url)
+        track = await self.cache.get(url)
+        if track is None:
+            track = await self.loop.run_in_executor(None, get_video_info, url)
+            await self.cache.set(track)
+
         self.playlist.append(track)
         self.queue.append(track)
 
