@@ -49,6 +49,18 @@ class PlayerState:
             return self.current_track
         return None
 
+    def skip_to(self, index: int):
+        idx = index % len(self.queue)
+        self.current_index = idx
+
+    def move(self, idx: int, to_idx: int):
+        if to_idx == 0:
+            to_idx = 1
+        if idx == 0:
+            raise ValueError("Cannot move current track")
+
+        self.queue.insert(to_idx, self.queue.pop(idx))
+
     def shuffle_toggle(self):
         self.is_shuffled = not self.is_shuffled
         if self.is_shuffled:

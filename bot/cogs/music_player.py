@@ -160,8 +160,7 @@ class MusicPlayer(commands.Cog):
 
         if volume is None:
             return await ctx.send(
-                embed=make_simple_embed(f"🔊 {self._volume[ctx.guild.id] * 100:.0f}%"),
-                delete_after=DELETE_AFTER,
+                embed=make_simple_embed(f"🔊 {self._volume[ctx.guild.id] * 100:.0f}%")
             )
 
         if volume < 0 or volume > 100:
@@ -177,6 +176,16 @@ class MusicPlayer(commands.Cog):
 
         self._volume[ctx.guild.id] = volume / 100
         await ctx.message.add_reaction("✅")
+
+    @commands.command(aliases=["mv"])
+    async def move(self, ctx, idx: int, to_idx: int):
+        state = self.get_state(ctx.guild.id)
+        try:
+            state.move(idx, to_idx)
+        except ValueError:
+            await ctx.message.add_reaction("❌")
+        else:
+            await ctx.message.add_reaction("✅")
 
 
 async def setup(bot):
