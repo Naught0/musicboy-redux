@@ -3,12 +3,13 @@ import logging
 import os
 
 import discord
-from discord.ext import commands
 from dotenv import load_dotenv
 
-from bot.bot import MusicPlayer
+from bot.bot import MusicBotRedux
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.ERROR if os.getenv("ENV") == "production" else logging.INFO
+)
 
 
 async def main():
@@ -20,16 +21,8 @@ async def main():
     if not discord.opus.is_loaded():
         raise Exception("Failed to load opus")
 
-    intents = discord.Intents.default()
-    intents.message_content = True
-    intents.voice_states = True
-    bot = commands.Bot(command_prefix=["!!", "-"], intents=intents)
+    bot = MusicBotRedux()
 
-    @bot.event
-    async def on_ready():
-        print(f"Logged in as {bot.user} (ID: {bot.application_id})")
-
-    await bot.add_cog(MusicPlayer(bot))
     await bot.start(os.environ["BOT_TOKEN"])
 
 
