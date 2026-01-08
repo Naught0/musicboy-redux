@@ -4,7 +4,6 @@ mod player;
 mod utils;
 mod youtube;
 
-use anyhow::Context as _;
 use dashmap::DashMap;
 use poise::serenity_prelude as serenity;
 use redis::Client as RedisClient;
@@ -38,7 +37,7 @@ async fn main() {
             commands: commands::all_commands(),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("-".into()),
-                additional_prefixes: vec!["!!".into()],
+                additional_prefixes: vec![poise::Prefix::Literal("!!")],
                 ..Default::default()
             },
             ..Default::default()

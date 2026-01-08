@@ -1,6 +1,6 @@
 use crate::{cache::VideoInfoCache, player::PlayerState, utils, youtube, Context, Error};
 use poise::serenity_prelude as serenity;
-use songbird::{input::Input, tracks::TrackHandle, Call};
+use songbird::Call;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -36,11 +36,15 @@ async fn play_next_in_queue(
 ) {
     let mut state_guard = state.lock().await;
     
+    state_guard.current_handle = None;
+
     if let Some(track_info) = state_guard.pop_next() {
         let mut handler_guard = handler.lock().await;
         
         let src = songbird::input::YoutubeDl::new(reqwest::Client::new(), track_info.url.clone());
-        let _handle = handler_guard.play_input(src.into());
+        let handle = handler_guard.play_input(src.into());
+        
+        state_guard.current_handle = Some(handle);
     }
 }
 
@@ -54,7 +58,7 @@ async fn join(ctx: Context<'_>) -> Result<(), Error> {
 
     let manager = songbird::get(ctx.serenity_context())
         .await
-        .expect("Songbird Voice client placed in at initialisation.")
+        .ok_or("Songbird Voice client not initialized")?
         .clone();
 
     let _ = manager.join(guild_id, channel_id).await;
@@ -67,7 +71,7 @@ async fn leave(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Not in a guild")?;
     let manager = songbird::get(ctx.serenity_context())
         .await
-        .expect("Songbird Voice client placed in at initialisation.")
+        .ok_or("Songbird Voice client not initialized")?
         .clone();
 
     if manager.leave(guild_id).await.is_ok() {
@@ -81,7 +85,7 @@ async fn play(ctx: Context<'_>, #[rest] url: Option<String>) -> Result<(), Error
     let guild_id = ctx.guild_id().ok_or("Not in a guild")?;
     let state = get_state(&ctx).await.unwrap();
     
-    if let Ok(manager) = songbird::get(ctx.serenity_context()).await {
+    if let Some(manager) = songbird::get(ctx.serenity_context()).await {
         if manager.get(guild_id).is_none() {
              let channel_id = ctx
                 .guild()
@@ -126,9 +130,20 @@ async fn play(ctx: Context<'_>, #[rest] url: Option<String>) -> Result<(), Error
 
     if let Some(manager) = songbird::get(ctx.serenity_context()).await {
         if let Some(handler_lock) = manager.get(guild_id) {
-            let mut handler = handler_lock.lock().await;
-            if handler.queue().current().is_none() {
-                drop(handler);
+            let should_play = {
+                let guard = state.lock().await;
+                match &guard.current_handle {
+                    None => true,
+                    Some(h) => {
+                        match h.get_info().await {
+                            Ok(info) => matches!(info.playing, songbird::tracks::PlayMode::Stop | songbird::tracks::PlayMode::End),
+                            Err(_) => true,
+                        }
+                    }
+                }
+            };
+
+            if should_play {
                 play_next_in_queue(handler_lock.clone(), state.clone()).await;
             }
         }
@@ -144,10 +159,15 @@ async fn skip(ctx: Context<'_>) -> Result<(), Error> {
     
     if let Some(manager) = songbird::get(ctx.serenity_context()).await {
         if let Some(handler_lock) = manager.get(guild_id) {
-            let mut handler = handler_lock.lock().await;
-            let _ = handler.stop();
-            drop(handler);
             let state = get_state(&ctx).await.unwrap();
+            
+            {
+                let guard = state.lock().await;
+                if let Some(handle) = &guard.current_handle {
+                    let _ = handle.stop();
+                }
+            }
+            
             play_next_in_queue(handler_lock.clone(), state).await;
             ctx.say("Skipped!").await?;
         }
@@ -181,19 +201,14 @@ async fn queue(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command, prefix_command, aliases("np"))]
 async fn now_playing(ctx: Context<'_>) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("Not in a guild")?;
     let state_arc = get_state(&ctx).await.unwrap();
     let state = state_arc.lock().await;
 
     let mut progress = 0.0;
-    if let Some(manager) = songbird::get(ctx.serenity_context()).await {
-        if let Some(handler_lock) = manager.get(guild_id) {
-            let handler = handler_lock.lock().await;
-            if let Some(track) = handler.queue().current() {
-                if let Ok(info) = track.get_info().await {
-                    progress = info.position.as_secs_f64();
-                }
-            }
+    
+    if let Some(handle) = &state.current_handle {
+        if let Ok(info) = handle.get_info().await {
+            progress = info.position.as_secs_f64();
         }
     }
 
@@ -204,27 +219,25 @@ async fn now_playing(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command, prefix_command)]
 async fn pause(ctx: Context<'_>) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("Not in a guild")?;
-     if let Some(manager) = songbird::get(ctx.serenity_context()).await {
-        if let Some(handler_lock) = manager.get(guild_id) {
-            let mut handler = handler_lock.lock().await;
-            let _ = handler.queue().pause();
-            ctx.say("Paused").await?;
-        }
-     }
+    let state_arc = get_state(&ctx).await.unwrap();
+    let state = state_arc.lock().await;
+    
+    if let Some(handle) = &state.current_handle {
+        let _ = handle.pause();
+        ctx.say("Paused").await?;
+    }
     Ok(())
 }
 
 #[poise::command(slash_command, prefix_command)]
 async fn resume(ctx: Context<'_>) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("Not in a guild")?;
-     if let Some(manager) = songbird::get(ctx.serenity_context()).await {
-        if let Some(handler_lock) = manager.get(guild_id) {
-            let mut handler = handler_lock.lock().await;
-            let _ = handler.queue().resume();
-            ctx.say("Resumed").await?;
-        }
-     }
+    let state_arc = get_state(&ctx).await.unwrap();
+    let state = state_arc.lock().await;
+    
+    if let Some(handle) = &state.current_handle {
+        let _ = handle.play();
+        ctx.say("Resumed").await?;
+    }
     Ok(())
 }
 
@@ -244,20 +257,17 @@ async fn shuffle(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command, prefix_command, aliases("vol", "v"))]
 async fn volume(ctx: Context<'_>, level: u32) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("Not in a guild")?;
+    let state_arc = get_state(&ctx).await.unwrap();
+    let state = state_arc.lock().await;
+    
     if level > 100 {
         ctx.say("Volume must be 0-100").await?;
         return Ok(());
     }
 
-    if let Some(manager) = songbird::get(ctx.serenity_context()).await {
-        if let Some(handler_lock) = manager.get(guild_id) {
-            let mut handler = handler_lock.lock().await;
-            if let Some(track) = handler.queue().current() {
-                let _ = track.set_volume(level as f32 / 100.0);
-                ctx.say(format!("🔊 Volume set to {}%", level)).await?;
-            }
-        }
+    if let Some(handle) = &state.current_handle {
+        let _ = handle.set_volume(level as f32 / 100.0);
+        ctx.say(format!("🔊 Volume set to {}%", level)).await?;
     }
     Ok(())
 }

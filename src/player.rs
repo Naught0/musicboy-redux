@@ -1,5 +1,6 @@
 use crate::youtube::VideoInfo;
 use rand::seq::SliceRandom;
+use songbird::tracks::TrackHandle;
 use std::collections::VecDeque;
 
 #[derive(Debug)]
@@ -7,6 +8,7 @@ pub struct PlayerState {
     pub playlist: Vec<VideoInfo>,
     pub queue: VecDeque<VideoInfo>,
     pub current_track: Option<VideoInfo>,
+    pub current_handle: Option<TrackHandle>,
     pub is_shuffled: bool,
 }
 
@@ -16,6 +18,7 @@ impl PlayerState {
             playlist: Vec::new(),
             queue: VecDeque::new(),
             current_track: None,
+            current_handle: None,
             is_shuffled: false,
         }
     }
