@@ -111,7 +111,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
         return self.read_count * 0.02
 
     @classmethod
-    def from_video_info(cls, info: VideoInfo):
+    def from_video_info(cls, info: VideoInfo, volume=0.5):
         return cls(
-            discord.FFmpegPCMAudio(info.audio_url, options=FFMPEG_OPTIONS["options"])
+            discord.FFmpegPCMAudio(info.audio_url, options=FFMPEG_OPTIONS["options"]),
+            volume=volume,
         )
