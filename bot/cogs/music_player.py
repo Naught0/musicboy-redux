@@ -21,6 +21,7 @@ class MusicPlayer(commands.Cog):
         self._states: dict[int, PlayerState] = defaultdict(
             lambda: PlayerState(bot.cache)
         )
+        self._volume = defaultdict(lambda: 0.5)
         self._tasks = set()
 
     def get_state(self, guild_id: int) -> PlayerState:
@@ -37,7 +38,7 @@ class MusicPlayer(commands.Cog):
 
         if info:
             ctx.voice_client.play(
-                YTDLSource.from_video_info(info),
+                YTDLSource.from_video_info(info, volume=self._volume[ctx.guild.id]),
                 after=lambda _: self.bot.loop.create_task(self.play_next(ctx)),
             )
             if isinstance(ctx.voice_client.source, YTDLSource):
@@ -154,16 +155,12 @@ class MusicPlayer(commands.Cog):
 
     @commands.command(aliases=["v", "vol"])
     async def volume(self, ctx: commands.Context, volume: int | None = None):
-        if not isinstance(ctx.voice_client, discord.VoiceClient):
-            return await ctx.message.add_reaction("❌")
-        if not isinstance(ctx.voice_client.source, discord.PCMVolumeTransformer):
-            return await ctx.message.add_reaction("❌")
+        if not ctx.guild:
+            return
 
         if volume is None:
             return await ctx.send(
-                embed=make_simple_embed(
-                    f"🔊 {int(ctx.voice_client.source.volume * 100)}%"
-                ),
+                embed=make_simple_embed(f"🔊 {self._volume[ctx.guild.id] * 100:.0f}%"),
                 delete_after=DELETE_AFTER,
             )
 
@@ -174,7 +171,12 @@ class MusicPlayer(commands.Cog):
                 delete_after=DELETE_AFTER,
             )
 
-        ctx.voice_client.source.volume = volume / 100
+        if isinstance(ctx.voice_client, discord.VoiceClient):
+            if isinstance(ctx.voice_client.source, YTDLSource):
+                ctx.voice_client.source.volume = volume / 100
+
+        self._volume[ctx.guild.id] = volume / 100
+        await ctx.message.add_reaction("✅")
 
 
 async def setup(bot):
