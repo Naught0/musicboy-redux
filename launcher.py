@@ -12,10 +12,14 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def main():
-    if not discord.opus.is_loaded:
+    load_dotenv()
+
+    if not discord.opus.is_loaded():
         discord.opus.load_opus(os.environ["OPUS_PATH"])
 
-    load_dotenv()
+    if not discord.opus.is_loaded():
+        raise Exception("Failed to load opus")
+
     intents = discord.Intents.default()
     intents.message_content = True
     intents.voice_states = True
