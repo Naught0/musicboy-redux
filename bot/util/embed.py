@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 import discord
 
 from bot.player import PlayerState
-from bot.util.helpers import chunk
+from bot.util.helpers import chunk, draw_progress_bar, seconds_to_time_str
 from bot.youtube import VideoInfo
 
 
@@ -17,13 +17,23 @@ def make_simple_embed(title: str, url: str = ""):
     )
 
 
-def make_np_embed(info: VideoInfo):
-    return discord.Embed(
-        title=f"▶️ {info['title']}",
+def make_np_embed(state: PlayerState, progress: float | None = None):
+    info = state.current_track
+    em = discord.Embed(
+        title=f"▶️ {info.title}",
         color=discord.Color.blurple(),
         timestamp=discord.utils.utcnow(),
-        url=info["url"],
+        url=info.url,
     )
+    if progress:
+        prog_str = (
+            f"{seconds_to_time_str(progress)}/{seconds_to_time_str(info.duration)}"
+        )
+        em.description = (
+            f"```{draw_progress_bar(progress, info.duration)}\n{prog_str:>23}```"
+        )
+
+    return em
 
 
 COLUMN_SIZE = 10
@@ -31,7 +41,7 @@ COLUMN_SIZE = 10
 
 def queue_to_numbered_list_str(queue: Sequence[VideoInfo], offset=0):
     return "\n".join(
-        f"{i + 1 + offset}. {source['title']}" for i, source in enumerate(queue)
+        f"{i + 1 + offset}. {source.title}" for i, source in enumerate(queue)
     )
 
 
@@ -45,14 +55,14 @@ def make_queue_embeds(state: PlayerState):
                 title="❌ Nothing Queued",
                 color=discord.Color.brand_red(),
                 timestamp=discord.utils.utcnow(),
-                url=np["url"],
+                url=np.url,
             )
         ]
 
     embeds = []
     if pages:
         for page_idx, page in enumerate(pages):
-            em = make_np_embed(state.current_track)
+            em = make_np_embed(state)
             columns = chunk(page, COLUMN_SIZE)
             for col_idx, col in enumerate(columns):
                 em.add_field(
@@ -64,7 +74,7 @@ def make_queue_embeds(state: PlayerState):
             em.set_footer(text=f"Page {page_idx + 1}/{len(pages)}")
             embeds.append(em)
     else:
-        em = make_np_embed(state.current_track)
+        em = make_np_embed(state)
         em.add_field(name="Up Next", value="✨ Nothing ✨")
         embeds.append(em)
 

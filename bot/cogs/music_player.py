@@ -26,19 +26,43 @@ class MusicPlayer(commands.Cog):
     def get_state(self, guild_id: int) -> PlayerState:
         return self._states[guild_id]
 
-    async def play_next(self, ctx):
-        state = self.get_state(ctx.guild.id)
-        video = state.get_next()
+    async def play_next(self, ctx: commands.Context):
+        if ctx.guild is None:
+            return
 
-        if video:
+        state = self.get_state(ctx.guild.id)
+        info = state.get_next()
+        if not isinstance(ctx.voice_client, discord.VoiceClient):
+            return await ctx.message.add_reaction("❌")
+
+        if info:
             ctx.voice_client.play(
-                YTDLSource.from_video_info(video),
+                YTDLSource.from_video_info(info),
                 after=lambda e: self.bot.loop.create_task(self.play_next(ctx)),
             )
-            await ctx.send(embed=make_np_embed(video))
+            if isinstance(ctx.voice_client.source, YTDLSource):
+                await ctx.send(
+                    embed=make_np_embed(state, ctx.voice_client.source.progress_seconds)
+                )
+            else:
+                print("Not YTDLSource, got", type(ctx.voice_client.source))
+
         else:
             await ctx.send(
                 embed=make_simple_embed("⏹️ Queue Finished"), delete_after=DELETE_AFTER
+            )
+            await ctx.voice_client.disconnect()
+
+    @commands.command(aliases=["np"])
+    async def now_playing(self, ctx):
+        state = self.get_state(ctx.guild.id)
+        if state.playlist:
+            await ctx.send(
+                embed=make_np_embed(state, ctx.voice_client.source.progress_seconds)
+            )
+        else:
+            await ctx.send(
+                embed=make_simple_embed("⏹️ Queue Empty"), delete_after=DELETE_AFTER
             )
 
     @commands.command(aliases=["leave"])
@@ -54,13 +78,11 @@ class MusicPlayer(commands.Cog):
             await ctx.message.add_reaction("❌")
 
     @commands.command(aliases=["p", "resume"])
-    async def play(self, ctx: commands.Context, *, url: str | None = None):
+    async def play(self, ctx, *, url: str | None = None):
         if not ctx.guild:
             return
         if not ctx.voice_client:
             await self.join(ctx)
-
-        voice_client: discord.VoiceClient = ctx.voice_client  # type: ignore
 
         state = self.get_state(ctx.guild.id)
         if url is None:
@@ -69,8 +91,13 @@ class MusicPlayer(commands.Cog):
                     embed=make_simple_embed("⏹️ Queue Empty"), delete_after=DELETE_AFTER
                 )
                 return await ctx.message.add_reaction("❌")
-            if voice_client.is_paused():
-                voice_client.resume()
+
+            if ctx.voice_client.is_paused():
+                ctx.voice_client.resume()
+            elif not ctx.voice_client.is_playing():
+                await self.play_next(ctx)
+            else:
+                print("Client is neither paused nor playing")
             return
 
         url = parse_yt_url(url)
@@ -83,10 +110,10 @@ class MusicPlayer(commands.Cog):
             task.add_done_callback(self._tasks.discard)
             self._tasks.add(task)
 
-        if not voice_client.is_playing():
+        if not ctx.voice_client.is_playing():
             await self.play_next(ctx)
 
-        await ctx.message.remove_reaction("🔄", ctx.bot.user)
+        await ctx.message.clear_reactions()
         await ctx.message.add_reaction("✅")
 
     @commands.command()
@@ -106,9 +133,9 @@ class MusicPlayer(commands.Cog):
         state = self.get_state(ctx.guild.id)
         state.shuffle_toggle()
         if state.is_shuffled:
-            await ctx.message.add_reaction("↩️")
-        else:
             await ctx.message.add_reaction("✅")
+        else:
+            await ctx.message.add_reaction("↩️")
 
     @commands.command(aliases=["q"])
     async def queue(self, ctx, *, url: str | None = None):
