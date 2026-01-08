@@ -40,25 +40,25 @@ class PlayerState:
     def get_next(self):
         if self.current_index + 1 < len(self.queue):
             self.current_index += 1
-            return self.queue[self.current_index]
+            return self.current_track
         return None
 
     def get_previous(self):
         if self.current_index > 0:
             self.current_index -= 1
-            return self.queue[self.current_index]
+            return self.current_track
         return None
 
     def shuffle_toggle(self):
         self.is_shuffled = not self.is_shuffled
         if self.is_shuffled:
-            # Keep current song at index 0, shuffle the rest
             current = (
                 [self.queue[self.current_index]] if self.current_index != -1 else []
             )
-            others = [t for i, t in enumerate(self.queue) if i != self.current_index]
+            current = self.queue.pop(self.current_index)
+            others = [t for t in self.queue]
             random.shuffle(others)
-            self.queue = current + others
+            self.queue = [current, *others]
             self.current_index = 0 if current else -1
         else:
             # Revert to original playlist order
