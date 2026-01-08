@@ -105,7 +105,10 @@ class MusicPlayer(commands.Cog):
     async def shuffle(self, ctx):
         state = self.get_state(ctx.guild.id)
         state.shuffle_toggle()
-        await ctx.message.add_reaction("✅")
+        if state.is_shuffled:
+            await ctx.message.add_reaction("↩️")
+        else:
+            await ctx.message.add_reaction("✅")
 
     @commands.command(aliases=["q"])
     async def queue(self, ctx, *, url: str | None = None):
