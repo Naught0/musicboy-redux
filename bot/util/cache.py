@@ -12,10 +12,11 @@ class VideoInfoCache:
         data = await self.redis.get(key)
         if data is None:
             return None
-        return orjson.loads(data)
+        print("Hit cache for ", key)
+        return VideoInfo(**orjson.loads(data))
 
     async def set(self, info: VideoInfo):
         return await self.redis.set(
-            info["url"],
+            info.url,
             orjson.dumps(info),
         )
