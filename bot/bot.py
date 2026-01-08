@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from collections import defaultdict
 
 import discord
 from discord.ext import commands
@@ -9,36 +9,25 @@ from bot.util.embed import make_np_embed, make_queue_embed, make_simple_embed
 from bot.youtube import YTDLSource, get_playlist_urls, parse_yt_url
 
 
-@dataclass
-class State:
-    player: PlayerState
-    last_np_message: discord.Message | None
-
-
 class MusicPlayer(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.states: dict[int, State] = {}
-        self.tasks = set()
+        self._states: dict[int, PlayerState] = defaultdict(PlayerState)
+        self._tasks = set()
 
-    def get_state(self, guild_id: int) -> State:
-        if guild_id not in self.states:
-            self.states[guild_id] = State(PlayerState(), None)
-        return self.states[guild_id]
+    def get_state(self, guild_id: int) -> PlayerState:
+        return self._states[guild_id]
 
     async def play_next(self, ctx):
         state = self.get_state(ctx.guild.id)
-        video = state.player.get_next()
+        video = state.get_next()
 
         if video:
             ctx.voice_client.play(
                 YTDLSource.from_video_info(video),
                 after=lambda e: self.bot.loop.create_task(self.play_next(ctx)),
             )
-            if state.last_np_message:
-                await state.last_np_message.delete()
-            msg = await ctx.send(embed=make_np_embed(video))
-            state.last_np_message = msg
+            await ctx.send(embed=make_np_embed(video))
         else:
             await ctx.send(
                 embed=make_simple_embed("⏹️ Queue Finished"), delete_after=DELETE_AFTER
@@ -67,7 +56,7 @@ class MusicPlayer(commands.Cog):
 
         state = self.get_state(ctx.guild.id)
         if url is None:
-            if not state.player.playlist:
+            if not state.playlist:
                 await ctx.send(
                     embed=make_simple_embed("⏹️ Queue Empty"), delete_after=DELETE_AFTER
                 )
@@ -79,17 +68,18 @@ class MusicPlayer(commands.Cog):
         url = parse_yt_url(url)
         await ctx.message.add_reaction("🔄")
         first, *rest = await get_playlist_urls(url)
-        await state.player.add_track(first)
+        await state.add_track(first)
 
         if rest:
-            task = self.bot.loop.create_task(state.player.add_tracks(rest))
-            task.add_done_callback(self.tasks.discard)
-            self.tasks.add(task)
+            task = self.bot.loop.create_task(state.add_tracks(rest))
+            task.add_done_callback(self._tasks.discard)
+            self._tasks.add(task)
 
         if not voice_client.is_playing():
             await self.play_next(ctx)
-        else:
-            await ctx.message.add_reaction("✅")
+
+        await ctx.message.remove_reaction("🔄", ctx.bot.user)
+        await ctx.message.add_reaction("✅")
 
     @commands.command()
     async def pause(self, ctx):
@@ -106,16 +96,19 @@ class MusicPlayer(commands.Cog):
     @commands.command()
     async def shuffle(self, ctx):
         state = self.get_state(ctx.guild.id)
-        state.player.shuffle_toggle()
+        state.shuffle_toggle()
         await ctx.message.add_reaction("✅")
 
     @commands.command(aliases=["q"])
-    async def queue(self, ctx):
+    async def queue(self, ctx, *, url: str | None = None):
         state = self.get_state(ctx.guild.id)
-        if not state.player.playlist:
+        if not state.playlist:
             return await ctx.message.add_reaction("❌")
 
-        await ctx.send(embed=make_queue_embed(state.player))
+        if url:
+            return await self.play(ctx, url=url)
+
+        await ctx.send(embed=make_queue_embed(state))
 
     @commands.command(aliases=["v", "vol"])
     async def volume(self, ctx: commands.Context, volume: int | None = None):
