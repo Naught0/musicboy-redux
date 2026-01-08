@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Mapping
-from typing import Any, TypedDict
+from dataclasses import dataclass
+from typing import Any
 from urllib import parse
 
 import discord
@@ -55,10 +56,12 @@ async def get_playlist_urls(url: str, *, loop: asyncio.AbstractEventLoop | None 
     return [url]  # Return as single-item list if it's just one video
 
 
-class VideoInfo(TypedDict):
+@dataclass
+class VideoInfo:
     title: str
     audio_url: str
     url: str
+    duration: int
 
 
 def parse_yt_url(url: str):
@@ -83,21 +86,32 @@ def get_video_info(url: str):
     if not (ytdl_url := data.get("url")):
         raise SongNotFound(f"Couldn't find url for {url}")
 
-    return VideoInfo(title=title, url=parse_yt_url(url), audio_url=ytdl_url)
+    return VideoInfo(
+        title=title,
+        url=parse_yt_url(url),
+        audio_url=ytdl_url,
+        duration=data.get("duration") or 0,
+    )
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source: discord.AudioSource, *, info: VideoInfo, volume=0.5):
+    def __init__(self, source: discord.AudioSource, volume=0.5):
         super().__init__(source, volume)
-        self.title = info["title"]
-        self.url = info["url"]
+        self.read_count = 0
+
+    def read(self):
+        data = super().read()
+        if data:
+            # discord.py reads in 20ms intervals, giving us prorgess calculations
+            self.read_count += 1
+        return data
+
+    @property
+    def progress_seconds(self):
+        return self.read_count * 0.02
 
     @classmethod
     def from_video_info(cls, info: VideoInfo):
         return cls(
-            discord.FFmpegPCMAudio(
-                info["audio_url"],
-                options=FFMPEG_OPTIONS["options"],
-            ),
-            info=info,
+            discord.FFmpegPCMAudio(info.audio_url, options=FFMPEG_OPTIONS["options"])
         )
