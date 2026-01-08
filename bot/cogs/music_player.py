@@ -38,7 +38,7 @@ class MusicPlayer(commands.Cog):
         if info:
             ctx.voice_client.play(
                 YTDLSource.from_video_info(info),
-                after=lambda e: self.bot.loop.create_task(self.play_next(ctx)),
+                after=lambda _: self.bot.loop.create_task(self.play_next(ctx)),
             )
             if isinstance(ctx.voice_client.source, YTDLSource):
                 await ctx.send(
